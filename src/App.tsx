@@ -4275,6 +4275,7 @@ function AppointmentManager({ appointments, onPatientClick, onRefresh, onSwitchT
   const { t } = useTranslation();
   const [showAddForm, setShowAddForm] = useState(false);
   const [editAppointment, setEditAppointment] = useState<Appointment | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
 
   const handleStatusChange = async (app: Appointment, status: string) => {
     try {
@@ -4343,8 +4344,28 @@ function AppointmentManager({ appointments, onPatientClick, onRefresh, onSwitchT
          </div>
       </div>
 
+      <div className="flex flex-wrap gap-2 bg-white rounded-2xl p-2 shadow-sm border border-slate-100">
+        {[
+          { id: 'all', label: 'Tous' },
+          { id: 'pending', label: 'En attente' },
+          { id: 'confirmed', label: 'Confirmé' },
+          { id: 'completed', label: 'Terminé' },
+          { id: 'refused', label: 'Refusé' },
+          { id: 'cancelled', label: 'Annulé' },
+          { id: 'rescheduled', label: 'Reporté' },
+          { id: 'scheduled', label: 'Planifié' },
+        ].map(f => (
+          <button key={f.id} onClick={() => setStatusFilter(f.id)}
+            className={cn("px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+              statusFilter === f.id ? "bg-blue-600 text-white shadow-sm" : "text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+            )}>
+            {f.label}
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6">
-         {appointments.map(app => (
+         {appointments.filter(app => statusFilter === 'all' || app.status === statusFilter).map(app => (
             <div key={app.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 hover:border-blue-200 transition-all group relative overflow-hidden">
                <div className="absolute top-0 right-0 p-4 flex gap-2">
                   <span className={cn("px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest", statusColors[app.status] || "bg-slate-100 text-slate-600")}>
@@ -5782,6 +5803,57 @@ function SettingsPage({ theme, setTheme, fontSize, setFontSize }: { theme: Theme
   const [importingExam, setImportingExam] = useState(false);
   const [importingDiagnosis, setImportingDiagnosis] = useState(false);
   const [importingMotif, setImportingMotif] = useState(false);
+  const [workingHours, setWorkingHours] = useState<{ day_of_week: number; start_time: string; end_time: string; is_available: boolean }[]>([]);
+  const [workingHoursLoading, setWorkingHoursLoading] = useState(false);
+  const [workingHoursSaved, setWorkingHoursSaved] = useState(false);
+
+  const dayNames = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+
+  const loadWorkingHours = async () => {
+    try {
+      const data = await api.getWorkingHours();
+      const defaultHours = [
+        { day_of_week: 1, start_time: '08:00', end_time: '17:00', is_available: true },
+        { day_of_week: 2, start_time: '08:00', end_time: '17:00', is_available: true },
+        { day_of_week: 3, start_time: '08:00', end_time: '17:00', is_available: true },
+        { day_of_week: 4, start_time: '08:00', end_time: '17:00', is_available: true },
+        { day_of_week: 5, start_time: '08:00', end_time: '17:00', is_available: true },
+        { day_of_week: 6, start_time: '09:00', end_time: '13:00', is_available: false },
+        { day_of_week: 0, start_time: '09:00', end_time: '13:00', is_available: false },
+      ];
+      if (data && data.length > 0) {
+        const mapped = data.map((d: any) => ({
+          day_of_week: d.day_of_week,
+          start_time: d.start_time?.slice(0, 5) || '08:00',
+          end_time: d.end_time?.slice(0, 5) || '17:00',
+          is_available: d.is_available,
+        }));
+        defaultHours.forEach(def => {
+          if (!mapped.find((m: any) => m.day_of_week === def.day_of_week)) {
+            mapped.push(def);
+          }
+        });
+        setWorkingHours(mapped);
+      } else {
+        setWorkingHours(defaultHours);
+      }
+    } catch { setWorkingHours([]); }
+  };
+
+  const handleWorkingHourChange = (day_of_week: number, field: string, value: string | boolean) => {
+    setWorkingHours(prev => prev.map(h => h.day_of_week === day_of_week ? { ...h, [field]: value } : h));
+  };
+
+  const saveWorkingHours = async () => {
+    setWorkingHoursLoading(true);
+    setWorkingHoursSaved(false);
+    try {
+      await api.setWorkingHours(workingHours);
+      setWorkingHoursSaved(true);
+      setTimeout(() => setWorkingHoursSaved(false), 3000);
+    } catch (err) { console.error(err); }
+    finally { setWorkingHoursLoading(false); }
+  };
 
   useEffect(() => {
     api.getUserSettings().then(saved => {
@@ -5805,6 +5877,7 @@ function SettingsPage({ theme, setTheme, fontSize, setFontSize }: { theme: Theme
     loadDiagnoses();
     loadConsultationMotifs();
     loadDciInteractions();
+    loadWorkingHours();
   }, []);
 
   const loadMeds = async () => {
@@ -6048,6 +6121,7 @@ function SettingsPage({ theme, setTheme, fontSize, setFontSize }: { theme: Theme
     { id: 'diagnoses', label: t('settings_diagnoses'), icon: Edit2 },
     { id: 'motifs', label: t('settings_motifs'), icon: Edit2 },
     { id: 'dciInteractions', label: 'Interactions (DCI)', icon: AlertTriangle },
+    { id: 'workingHours', label: 'Horaires', icon: Clock },
   ];
 
   return (
@@ -6493,6 +6567,51 @@ function SettingsPage({ theme, setTheme, fontSize, setFontSize }: { theme: Theme
                 <p>Aucune interaction par DCI définie.</p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {activeTab === 'workingHours' && (
+        <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-6 md:p-8">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight flex items-center gap-3">
+                <Clock className="text-blue-600" /> Horaires d'ouverture
+              </h3>
+              <p className="text-sm text-slate-500 font-medium mt-1">Personnalisez vos horaires de travail par jour</p>
+            </div>
+            <button onClick={saveWorkingHours} disabled={workingHoursLoading}
+              className={cn("px-5 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider transition-all flex items-center gap-2",
+                workingHoursSaved ? "bg-emerald-600 text-white shadow-lg shadow-emerald-100" : "bg-blue-600 text-white shadow-lg shadow-blue-100 hover:bg-blue-700"
+              )}>
+              {workingHoursLoading ? 'Enregistrement...' : workingHoursSaved ? '✓ Enregistré' : 'Enregistrer'}
+            </button>
+          </div>
+          <div className="space-y-2">
+            {[1, 2, 3, 4, 5, 6, 0].map(dow => {
+              const h = workingHours.find(w => w.day_of_week === dow);
+              if (!h) return null;
+              return (
+                <div key={dow} className={cn("flex items-center gap-3 p-3 rounded-2xl border transition-all", h.is_available ? "bg-slate-50 border-slate-200" : "bg-red-50/50 border-red-200")}>
+                  <div className="w-24 shrink-0">
+                    <p className={cn("font-bold text-sm", h.is_available ? "text-slate-800" : "text-red-500")}>{dayNames[dow === 0 ? 6 : dow - 1]}</p>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={h.is_available} onChange={e => handleWorkingHourChange(dow, 'is_available', e.target.checked)} className="w-4 h-4 rounded accent-blue-600" />
+                    <span className="text-xs font-semibold text-slate-500">Ouvert</span>
+                  </label>
+                  {h.is_available && (
+                    <div className="flex items-center gap-2 ml-auto">
+                      <input type="time" value={h.start_time} onChange={e => handleWorkingHourChange(dow, 'start_time', e.target.value)} className="px-2 py-1.5 bg-white rounded-lg border border-slate-200 text-sm font-bold text-slate-700 outline-none w-28" />
+                      <span className="text-slate-400 text-xs font-bold">à</span>
+                      <input type="time" value={h.end_time} onChange={e => handleWorkingHourChange(dow, 'end_time', e.target.value)} className="px-2 py-1.5 bg-white rounded-lg border border-slate-200 text-sm font-bold text-slate-700 outline-none w-28" />
+                    </div>
+                  )}
+                  {!h.is_available && (
+                    <span className="ml-auto text-xs font-bold text-red-400 uppercase tracking-wider">Fermé</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
