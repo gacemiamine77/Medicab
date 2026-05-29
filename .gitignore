@@ -1,0 +1,11 @@
+node_modules/
+MediAlert/
+dist/
+uploads/
+*.db
+*.db-shm
+*.db-wal
+medicabinet_local.db
+.env
+.env1
+local-db.ts

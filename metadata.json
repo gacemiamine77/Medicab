@@ -1,0 +1,6 @@
+{
+  "name": "MediCabinet",
+  "description": "Application professionnelle de gestion médicale : dossiers patients, ordonnances PDF, suivi médical complet et gestion de cabinet.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["medical_management", "pdf_generation", "offline_sync"]
+}

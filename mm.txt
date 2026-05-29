@@ -1,0 +1,34 @@
+ Le volume dans le lecteur D s'appelle amine
+ Le num‚ro de s‚rie du volume est F4E4-706A
+
+ R‚pertoire de D:\My_Prj\medicab\medicabpg\medicab
+
+21/05/2026  18:14    <DIR>          .
+16/05/2026  22:52    <DIR>          ..
+16/05/2026  08:54               363 .env
+14/05/2026  23:36               524 .env.example
+14/05/2026  23:36                96 .gitignore
+14/05/2026  23:36             2ÿ912 db-provider.ts
+21/05/2026  00:18    <DIR>          dist
+18/05/2026  20:40               340 Dockerfile
+20/05/2026  18:54               593 index.html
+20/05/2026  23:25            11ÿ901 local-db.ts
+14/05/2026  23:36               295 metadata.json
+21/05/2026  18:14                 0 mm.txt
+20/05/2026  22:41    <DIR>          node_modules
+20/05/2026  22:41           223ÿ120 package-lock.json
+20/05/2026  22:41             1ÿ566 package.json
+20/05/2026  23:25            16ÿ035 pg-db.ts
+14/05/2026  23:36               229 railway.toml
+14/05/2026  23:36               550 README.md
+20/05/2026  23:51            86ÿ850 server.ts
+14/05/2026  23:36    <DIR>          src
+14/05/2026  23:36               365 start_server.ps1
+14/05/2026  23:36               207 start_srv.bat
+14/05/2026  23:36               248 test_api.mjs
+14/05/2026  23:36               340 test_srv.ps1
+14/05/2026  23:36               508 tsconfig.json
+12/05/2026  21:29    <DIR>          uploads
+14/05/2026  23:36               705 vite.config.ts
+              21 fichier(s)          347ÿ747 octets
+               6 R‚p(s)  20ÿ260ÿ364ÿ288 octets libres
