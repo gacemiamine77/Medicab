@@ -1109,8 +1109,14 @@ async function startServer() {
       const { doctor_id, date } = req.query;
       if (!doctor_id || !date) return res.status(400).json({ error: "doctor_id and date required" });
       const dayOfWeek = new Date(date as string).getDay();
-      const hours = await pgQuery('SELECT start_time, end_time FROM doctor_working_hours WHERE doctor_id = $1 AND day_of_week = $2 AND is_available = true', [doctor_id, dayOfWeek]);
-      if (hours.length === 0) return res.json([]);
+      let hours = await pgQuery('SELECT start_time, end_time FROM doctor_working_hours WHERE doctor_id = $1 AND day_of_week = $2 AND is_available = true', [doctor_id, dayOfWeek]);
+      if (hours.length === 0) {
+        if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+          hours = [{ start_time: '08:00', end_time: '17:00' }];
+        } else {
+          return res.json([]);
+        }
+      }
       const { start_time, end_time } = hours[0];
       // Generate 30-min slots
       const slots: string[] = [];
