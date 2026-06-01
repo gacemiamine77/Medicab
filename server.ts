@@ -408,14 +408,16 @@ async function startServer() {
         await pgInsert('user_settings', { user_id: req.user.id, settings: JSON.stringify({}) }).catch(() => {});
         row = { settings: '{}' };
       }
-      const settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {});
+      let settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {});
+      if (typeof settings !== 'object' || settings === null) settings = {};
       res.json(settings);
     } catch (err) { res.status(500).json({ error: (err as Error).message }); }
   });
 
   app.put("/api/user-settings", authenticateToken, async (req: any, res) => {
     try {
-      const settings = req.body;
+      let settings = req.body;
+      if (typeof settings === 'string') { settings = {}; }
       const existing = await queryOne('SELECT id FROM user_settings WHERE user_id = $1', [req.user.id]);
       if (existing) {
         await pgUpdate('user_settings', existing.id, { settings: JSON.stringify(settings), updated_at: new Date().toISOString() });
@@ -1217,6 +1219,37 @@ async function startServer() {
     } catch (err) { res.status(500).json({ error: (err as Error).message }); }
   });
 
+  app.get("/api/public/prescriptions/:code", async (req, res) => {
+    try {
+      const row = await queryOne(`SELECT pr.*, p.first_name, p.last_name, u.full_name as doctor_name, u.clinic_name, u.address, u.city FROM prescriptions pr LEFT JOIN patients p ON pr.patient_id = p.id LEFT JOIN users u ON pr.doctor_id = u.id WHERE pr.prescription_code = $1`, [req.params.code]);
+      if (!row) return res.status(404).json({ error: "Ordonnance non trouvée." });
+      let medications: any[] = [];
+      if (typeof row.data === 'string') {
+        try {
+          const parsed = JSON.parse(row.data);
+          if (Array.isArray(parsed)) medications = parsed.map((m: any) => typeof m === 'object' && m !== null && !Array.isArray(m) ? m : typeof m === 'string' ? { name: m, dosage: '', frequency: '', duration: '', instructions: '', form: '' } : { name: String(m), dosage: '', frequency: '', duration: '', instructions: '', form: '' });
+        } catch { medications = []; }
+      } else if (Array.isArray(row.data)) {
+        medications = row.data.map((m: any) => typeof m === 'object' && m !== null && !Array.isArray(m) ? m : typeof m === 'string' ? { name: m, dosage: '', frequency: '', duration: '', instructions: '', form: '' } : { name: String(m), dosage: '', frequency: '', duration: '', instructions: '', form: '' });
+      }
+      res.json({
+        id: row.id,
+        prescription_code: row.prescription_code,
+        patient_id: row.patient_id,
+        doctor_id: row.doctor_id,
+        doctor_name: row.doctor_name || '',
+        clinic_name: row.clinic_name || '',
+        address: row.address || '',
+        city: row.city || '',
+        patient_first_name: row.first_name || '',
+        patient_last_name: row.last_name || '',
+        date_prescription: row.created_at ? row.created_at.toString().split('T')[0] : '',
+        status: row.status || 'pending',
+        medications
+      });
+    } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+  });
+
   app.delete("/api/patients/:id", authenticateToken, async (req: any, res) => {
     try {
       const existing = await queryOne('SELECT doctor_id FROM patients WHERE id = $1', [req.params.id]);
@@ -1267,6 +1300,30 @@ async function startServer() {
       await pgRun('UPDATE users SET password_hash = $1 WHERE id = $2', [await bcrypt.hash(password, 10), decoded.id]);
       res.json({ success: true });
     } catch (err) { res.status(500).json({ error: "Token invalide ou expiré" }); }
+  });
+
+  app.put("/api/auth/update-profile", authenticateToken, async (req: any, res) => {
+    const { full_name, clinic_name, current_password, new_password } = req.body;
+    try {
+      if (new_password) {
+        if (!current_password) return res.status(400).json({ error: "Mot de passe actuel requis" });
+        const userRow = await queryOne('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
+        if (!userRow) return res.status(404).json({ error: "Utilisateur non trouvé" });
+        const valid = await bcrypt.compare(current_password, userRow.password_hash);
+        if (!valid) return res.status(400).json({ error: "Mot de passe actuel incorrect" });
+        await pgRun('UPDATE users SET password_hash = $1 WHERE id = $2', [await bcrypt.hash(new_password, 10), req.user.id]);
+      }
+      const updates: string[] = [];
+      const values: any[] = [];
+      let idx = 1;
+      if (full_name !== undefined) { updates.push(`full_name = $${idx++}`); values.push(full_name); }
+      if (clinic_name !== undefined) { updates.push(`clinic_name = $${idx++}`); values.push(clinic_name); }
+      if (updates.length > 0) {
+        values.push(req.user.id);
+        await pgRun(`UPDATE users SET ${updates.join(', ')} WHERE id = $${idx}`, values);
+      }
+      res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: (err as Error).message }); }
   });
 
   app.get("/api/laboratories", authenticateToken, async (req: any, res) => {

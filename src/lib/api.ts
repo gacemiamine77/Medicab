@@ -586,6 +586,11 @@ export const api = {
     return handleResponse(res, "Failed to reset password");
   },
 
+  updateProfile: async (data: { full_name?: string; clinic_name?: string; current_password?: string; new_password?: string }): Promise<{ success: boolean }> => {
+    const res = await fetch("/api/auth/update-profile", { method: "PUT", headers: getHeaders(), body: JSON.stringify(data) });
+    return handleResponse(res, "Failed to update profile");
+  },
+
   getAppointments: async (): Promise<Appointment[]> => {
     const res = await fetch("/api/appointments", { headers: getHeaders() });
     return handleResponse(res, "Failed to fetch appointments");

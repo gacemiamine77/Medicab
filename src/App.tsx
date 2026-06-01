@@ -80,12 +80,22 @@ import "./i18n";
 import { api, type User, type Patient, type Appointment, type Consultation, type Medication, type MedicalExam, type MedicalReport, type MedicationLibrary, type DciInteraction, type Prescription, type SharePermission, type SimpleListItem, type ParaclinicalExam, type MedicationRestriction } from "./lib/api";
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths } from "date-fns";
 import { generatePrescriptionPDF, generateReportPDF, generateDispenseReceiptPDF, generateInvoicePDF, generateExamReportPDF } from "./lib/pdf";
+import * as QRCode from "qrcode";
 import AdminPortal from "./components/AdminPortal";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+function PrescriptionQrCode({ code, size = 80 }: { code: string; size?: number }) {
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    QRCode.toDataURL(code, { margin: 1, width: size }).then(setQrDataUrl).catch(() => {});
+  }, [code, size]);
+  if (!qrDataUrl) return null;
+  return <img src={qrDataUrl} alt={`QR ${code}`} style={{ width: size, height: size }} className="rounded-lg" />;
 }
 
 type Page = "dashboard" | "patients" | "appointments" | "patient-detail" | "new-patient" | "calendar" | "stats" | "medical-records" | "settings" | "contact" | "lab-dashboard" | "directory";
@@ -254,14 +264,19 @@ function PharmacistDashboard({ onDispense, user }: { loading: boolean, onDispens
                 <h4 className="text-2xl font-black text-slate-800">{foundPrescription.first_name} {foundPrescription.last_name}</h4>
                 <p className="text-slate-500 font-medium mt-1">Pratiqué par <span className="text-slate-800 font-bold">{foundPrescription.doctor_name}</span> le {format(new Date(foundPrescription.created_at), "dd/MM/yyyy")}</p>
               </div>
-              <div className="text-right">
-                <span className={cn(
-                  "px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest",
-                  foundPrescription.status === 'pending' ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"
-                )}>
-                  {foundPrescription.status === 'pending' ? 'En attente' : 'Délivrée'}
-                </span>
-                <p className="text-[10px] font-black text-slate-400 mt-2">CODE: {foundPrescription.prescription_code}</p>
+              <div className="text-right flex items-start gap-4">
+                <div>
+                  <span className={cn(
+                    "px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest",
+                    foundPrescription.status === 'pending' ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"
+                  )}>
+                    {foundPrescription.status === 'pending' ? 'En attente' : 'Délivrée'}
+                  </span>
+                  <p className="text-[10px] font-black text-slate-400 mt-2">CODE: {foundPrescription.prescription_code}</p>
+                </div>
+                {foundPrescription.prescription_code && (
+                  <PrescriptionQrCode code={foundPrescription.prescription_code} size={72} />
+                )}
               </div>
             </div>
 
@@ -404,7 +419,8 @@ export default function App() {
   const saveThemeSettings = useCallback(() => {
     if (!user) return;
     try {
-      const currentSettings = JSON.parse(localStorage.getItem('medicab_prescription_template') || '{}');
+      let currentSettings = JSON.parse(localStorage.getItem('medicab_prescription_template') || '{}');
+      if (typeof currentSettings !== 'object' || currentSettings === null) currentSettings = {};
       api.saveUserSettings({ ...currentSettings, theme, fontSize }).catch(() => {});
     } catch {}
   }, [user, theme, fontSize]);
@@ -1364,6 +1380,8 @@ export default function App() {
               setTheme={setTheme}
               fontSize={fontSize}
               setFontSize={setFontSize}
+              user={user}
+              setUser={setUser}
             />
           )}
 
@@ -4633,7 +4651,9 @@ function ConsultationCard({ consult, onPrint, onEdit, onDelete, prescriptionStat
             )}
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-start gap-3">
+          {consult.prescription_code && <PrescriptionQrCode code={consult.prescription_code} size={48} />}
+          <div className="flex gap-2">
           <button
             onClick={onEdit}
             className="text-slate-400 hover:text-amber-600 transition-colors p-2 rounded-lg hover:bg-amber-50 flex items-center gap-2"
@@ -4658,6 +4678,7 @@ function ConsultationCard({ consult, onPrint, onEdit, onDelete, prescriptionStat
               <span className="text-[10px] font-bold uppercase tracking-widest">Supprimer</span>
             </button>
           )}
+          </div>
         </div>
       </div>
 
@@ -5774,7 +5795,7 @@ function MedicalRecordsPage({ onPatientClick }: { onPatientClick: (id: number) =
   );
 }
 
-function SettingsPage({ theme, setTheme, fontSize, setFontSize }: { theme: Theme, setTheme: (t: Theme) => void, fontSize: FontSize, setFontSize: (f: FontSize) => void }) {
+function SettingsPage({ theme, setTheme, fontSize, setFontSize, user, setUser }: { theme: Theme, setTheme: (t: Theme) => void, fontSize: FontSize, setFontSize: (f: FontSize) => void, user: User | null, setUser: (u: User | null) => void }) {
   const { t } = useTranslation();
   const [meds, setMeds] = useState<MedicationLibrary[]>([]);
   const [newMed, setNewMed] = useState<Partial<MedicationLibrary>>({ name: '', dosage: '', unit: '', packaging: '', dci: '', form: '', abbreviation: '', posology: '', classe: '' });
@@ -5796,16 +5817,24 @@ function SettingsPage({ theme, setTheme, fontSize, setFontSize }: { theme: Theme
   const MEDICATION_FIELDS = ['name', 'dosage', 'unit', 'packaging', 'dci', 'form', 'abbreviation', 'posology', 'classe'] as const;
   const FIELD_LABELS: Record<string, string> = { name: 'Nom *', dosage: 'Dosage', unit: 'Unité', packaging: 'Conditionnement', dci: 'DCI', form: 'Forme', abbreviation: 'Abréviation', posology: 'Posologie', classe: 'Classe' };
   const [prescriptionTemplate, setPrescriptionTemplate] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('medicab_prescription_template') || '{}'); }
+    try { const v = JSON.parse(localStorage.getItem('medicab_prescription_template') || '{}'); return typeof v === 'object' && v !== null ? v : {}; }
     catch { return {}; }
   });
-  const [activeTab, setActiveTab] = useState('appearance');
+  const [activeTab, setActiveTab] = useState('configuration');
+  const [configSubTab, setConfigSubTab] = useState('appearance');
   const [importingExam, setImportingExam] = useState(false);
   const [importingDiagnosis, setImportingDiagnosis] = useState(false);
   const [importingMotif, setImportingMotif] = useState(false);
   const [workingHours, setWorkingHours] = useState<{ day_of_week: number; start_time: string; end_time: string; is_available: boolean }[]>([]);
   const [workingHoursLoading, setWorkingHoursLoading] = useState(false);
   const [workingHoursSaved, setWorkingHoursSaved] = useState(false);
+  const [profileFullName, setProfileFullName] = useState(user?.full_name || '');
+  const [profileClinicName, setProfileClinicName] = useState(user?.clinic_name || '');
+  const [profileCurrentPassword, setProfileCurrentPassword] = useState('');
+  const [profileNewPassword, setProfileNewPassword] = useState('');
+  const [profileConfirmPassword, setProfileConfirmPassword] = useState('');
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileSaved, setProfileSaved] = useState<boolean | null>(null);
 
   const dayNames = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 
@@ -5853,6 +5882,34 @@ function SettingsPage({ theme, setTheme, fontSize, setFontSize }: { theme: Theme
       setTimeout(() => setWorkingHoursSaved(false), 3000);
     } catch (err) { console.error(err); }
     finally { setWorkingHoursLoading(false); }
+  };
+
+  const handleSaveProfile = async () => {
+    setProfileLoading(true);
+    setProfileSaved(null);
+    try {
+      const payload: any = { full_name: profileFullName, clinic_name: profileClinicName };
+      if (profileNewPassword) {
+        if (profileNewPassword !== profileConfirmPassword) {
+          setProfileSaved(false);
+          setProfileLoading(false);
+          return;
+        }
+        payload.current_password = profileCurrentPassword;
+        payload.new_password = profileNewPassword;
+      }
+      await api.updateProfile(payload);
+      if (user) setUser({ ...user, full_name: profileFullName, clinic_name: profileClinicName });
+      setProfileCurrentPassword('');
+      setProfileNewPassword('');
+      setProfileConfirmPassword('');
+      setProfileSaved(true);
+      setTimeout(() => setProfileSaved(null), 3000);
+    } catch (err) {
+      setProfileSaved(false);
+    } finally {
+      setProfileLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -6114,14 +6171,13 @@ function SettingsPage({ theme, setTheme, fontSize, setFontSize }: { theme: Theme
   };
 
   const tabs = [
-    { id: 'appearance', label: t('settings_appearance'), icon: Sun },
+    { id: 'configuration', label: t('settings_configuration'), icon: Sun },
     { id: 'ordonnances', label: t('settings_ordonnances'), icon: Printer },
     { id: 'medications', label: t('settings_medications'), icon: ClipboardList },
     { id: 'exams', label: t('settings_exams'), icon: Activity },
     { id: 'diagnoses', label: t('settings_diagnoses'), icon: Edit2 },
     { id: 'motifs', label: t('settings_motifs'), icon: Edit2 },
     { id: 'dciInteractions', label: 'Interactions (DCI)', icon: AlertTriangle },
-    { id: 'workingHours', label: 'Horaires', icon: Clock },
   ];
 
   return (
@@ -6149,56 +6205,184 @@ function SettingsPage({ theme, setTheme, fontSize, setFontSize }: { theme: Theme
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'appearance' && (
-        <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 max-w-xl space-y-8">
-          <div>
-            <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight flex items-center gap-3">
-              <Sun className="text-blue-600" /> {t("appearance_title")}
-            </h3>
-            <p className="text-sm text-slate-500 font-medium mt-1">{t("appearance_desc")}</p>
+      {activeTab === 'configuration' && (
+        <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 max-w-xl">
+          {/* Sub-navigation */}
+          <div className="flex gap-2 mb-6 pb-4 border-b border-slate-100">
+            {[
+              { id: 'appearance', label: t('appearance_title'), icon: Sun },
+              { id: 'horaires', label: 'Horaires', icon: Clock },
+              { id: 'profil', label: t('profile_title'), icon: Users },
+            ].map(sub => (
+              <button key={sub.id} onClick={() => setConfigSubTab(sub.id)}
+                className={cn("flex items-center gap-2 px-4 py-2.5 rounded-xl font-extrabold text-xs uppercase tracking-widest transition-all",
+                  configSubTab === sub.id ? "bg-blue-600 text-white shadow-lg shadow-blue-100" : "text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+                )}>
+                <sub.icon size={16} />
+                {sub.label}
+              </button>
+            ))}
           </div>
-          <div>
-            <label className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-4">{t("theme_label")}</label>
-            <div className="grid grid-cols-1 gap-3">
-              {[
-                { id: 'light', label: t('theme_light'), icon: Sun, desc: t('theme_light_desc') },
-                { id: 'dark', label: t('theme_dark'), icon: Moon, desc: t('theme_dark_desc') },
-                { id: 'night', label: t('theme_night'), icon: Moon, desc: t('theme_night_desc') },
-                { id: 'medical', label: t('theme_medical'), icon: Stethoscope, desc: t('theme_medical_desc') },
-                { id: 'duo', label: t('theme_duo'), icon: Palette, desc: t('theme_duo_desc') },
-                { id: 'moderne', label: t('theme_moderne'), icon: Sparkles, desc: t('theme_moderne_desc') },
-              ].map((th) => (
-                <button key={th.id} onClick={() => setTheme(th.id as Theme)}
-                  className={cn("flex items-center gap-4 p-4 rounded-2xl border-2 transition-all text-left",
-                    theme === th.id ? "border-blue-600 bg-blue-50/50 shadow-sm" : "border-slate-100 opacity-60 hover:opacity-100"
+
+          {/* Apparence sub-section */}
+          {configSubTab === 'appearance' && (
+            <div className="space-y-8">
+              <div>
+                <label className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-4">{t("theme_label")}</label>
+                <div className="grid grid-cols-1 gap-3">
+                  {[
+                    { id: 'light', label: t('theme_light'), icon: Sun, desc: t('theme_light_desc') },
+                    { id: 'dark', label: t('theme_dark'), icon: Moon, desc: t('theme_dark_desc') },
+                    { id: 'night', label: t('theme_night'), icon: Moon, desc: t('theme_night_desc') },
+                    { id: 'medical', label: t('theme_medical'), icon: Stethoscope, desc: t('theme_medical_desc') },
+                    { id: 'duo', label: t('theme_duo'), icon: Palette, desc: t('theme_duo_desc') },
+                    { id: 'moderne', label: t('theme_moderne'), icon: Sparkles, desc: t('theme_moderne_desc') },
+                  ].map((th) => (
+                    <button key={th.id} onClick={() => setTheme(th.id as Theme)}
+                      className={cn("flex items-center gap-4 p-4 rounded-2xl border-2 transition-all text-left",
+                        theme === th.id ? "border-blue-600 bg-blue-50/50 shadow-sm" : "border-slate-100 opacity-60 hover:opacity-100"
+                      )}>
+                      <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+                        theme === th.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"
+                      )}><th.icon size={20} /></div>
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-tight text-slate-800">{th.label}</p>
+                        <p className="text-[10px] text-slate-500 font-medium">{th.desc}</p>
+                      </div>
+                      {theme === th.id && <Check size={16} className="ml-auto text-blue-600" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-4">{t("font_size")}</label>
+                <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-100">
+                  {[
+                    { id: 'small', label: t('font_small') },
+                    { id: 'medium', label: t('font_medium') },
+                    { id: 'large', label: t('font_large') },
+                  ].map((f) => (
+                    <button key={f.id} onClick={() => setFontSize(f.id as FontSize)}
+                      className={cn("py-3 px-2 rounded-xl font-black uppercase tracking-tighter transition-all text-[10px]",
+                        fontSize === f.id ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                      )}>{f.label}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Horaires sub-section */}
+          {configSubTab === 'horaires' && workingHours.length > 0 && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight flex items-center gap-3">
+                    <Clock className="text-blue-600" /> Horaires d'ouverture
+                  </h3>
+                  <p className="text-sm text-slate-500 font-medium mt-1">Personnalisez vos horaires de travail par jour</p>
+                </div>
+                <button onClick={saveWorkingHours} disabled={workingHoursLoading}
+                  className={cn("px-5 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider transition-all flex items-center gap-2",
+                    workingHoursSaved ? "bg-emerald-600 text-white shadow-lg shadow-emerald-100" : "bg-blue-600 text-white shadow-lg shadow-blue-100 hover:bg-blue-700"
                   )}>
-                  <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
-                    theme === th.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"
-                  )}><th.icon size={20} /></div>
-                  <div>
-                    <p className="text-xs font-black uppercase tracking-tight text-slate-800">{th.label}</p>
-                    <p className="text-[10px] text-slate-500 font-medium">{th.desc}</p>
-                  </div>
-                  {theme === th.id && <Check size={16} className="ml-auto text-blue-600" />}
+                  {workingHoursLoading ? 'Enregistrement...' : workingHoursSaved ? '✓ Enregistré' : 'Enregistrer'}
                 </button>
-              ))}
+              </div>
+              <div className="space-y-2">
+                {[1, 2, 3, 4, 5, 6, 0].map(dow => {
+                  const h = workingHours.find(w => w.day_of_week === dow);
+                  if (!h) return null;
+                  return (
+                    <div key={dow} className={cn("flex items-center gap-3 p-3 rounded-2xl border transition-all", h.is_available ? "bg-slate-50 border-slate-200" : "bg-red-50/50 border-red-200")}>
+                      <div className="w-24 shrink-0">
+                        <p className={cn("font-bold text-sm", h.is_available ? "text-slate-800" : "text-red-500")}>{dayNames[dow === 0 ? 6 : dow - 1]}</p>
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={h.is_available} onChange={e => handleWorkingHourChange(dow, 'is_available', e.target.checked)} className="w-4 h-4 rounded accent-blue-600" />
+                        <span className="text-xs font-semibold text-slate-500">Ouvert</span>
+                      </label>
+                      {h.is_available && (
+                        <div className="flex items-center gap-2 ml-auto">
+                          <input type="time" value={h.start_time} onChange={e => handleWorkingHourChange(dow, 'start_time', e.target.value)} className="px-2 py-1.5 bg-white rounded-lg border border-slate-200 text-sm font-bold text-slate-700 outline-none w-28" />
+                          <span className="text-slate-400 text-xs font-bold">à</span>
+                          <input type="time" value={h.end_time} onChange={e => handleWorkingHourChange(dow, 'end_time', e.target.value)} className="px-2 py-1.5 bg-white rounded-lg border border-slate-200 text-sm font-bold text-slate-700 outline-none w-28" />
+                        </div>
+                      )}
+                      {!h.is_available && (
+                        <span className="ml-auto text-xs font-bold text-red-400 uppercase tracking-wider">Fermé</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-          <div>
-            <label className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-4">{t("font_size")}</label>
-            <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-100">
-              {[
-                { id: 'small', label: t('font_small') },
-                { id: 'medium', label: t('font_medium') },
-                { id: 'large', label: t('font_large') },
-              ].map((f) => (
-                <button key={f.id} onClick={() => setFontSize(f.id as FontSize)}
-                  className={cn("py-3 px-2 rounded-xl font-black uppercase tracking-tighter transition-all text-[10px]",
-                    fontSize === f.id ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
-                  )}>{f.label}</button>
-              ))}
+          )}
+
+          {/* Profil sub-section */}
+          {configSubTab === 'profil' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight flex items-center gap-3 mb-1">
+                  <Users className="text-blue-600" /> {t("profile_title")}
+                </h3>
+                <p className="text-sm text-slate-500 font-medium">{t("profile_desc")}</p>
+              </div>
+
+              {profileSaved !== null && (
+                <div className={cn("p-4 rounded-2xl text-xs font-bold flex items-center gap-3 border",
+                  profileSaved ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-red-50 text-red-600 border-red-100"
+                )}>
+                  {profileSaved ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+                  {profileSaved ? t("profile_save_success") : t("profile_save_error")}
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-2">{t("profile_full_name")}</label>
+                  <input type="text" value={profileFullName} onChange={e => setProfileFullName(e.target.value)}
+                    placeholder={t("profile_full_name_placeholder")}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-2">{t("profile_clinic_name")}</label>
+                  <input type="text" value={profileClinicName} onChange={e => setProfileClinicName(e.target.value)}
+                    placeholder={t("profile_clinic_name_placeholder")}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100">
+                <h4 className="text-sm font-black text-slate-600 uppercase tracking-wider mb-4">Changer le mot de passe</h4>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-2">{t("profile_current_password")}</label>
+                    <input type="password" value={profileCurrentPassword} onChange={e => setProfileCurrentPassword(e.target.value)}
+                      placeholder={t("profile_password_placeholder")}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-2">{t("profile_new_password")}</label>
+                    <input type="password" value={profileNewPassword} onChange={e => setProfileNewPassword(e.target.value)}
+                      placeholder={t("profile_password_placeholder")}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest block mb-2">{t("profile_confirm_password")}</label>
+                    <input type="password" value={profileConfirmPassword} onChange={e => setProfileConfirmPassword(e.target.value)}
+                      placeholder={t("profile_password_placeholder")}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+              </div>
+
+              <button onClick={handleSaveProfile} disabled={profileLoading}
+                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-sm shadow-xl shadow-blue-200 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 cursor-pointer">
+                {profileLoading ? t("profile_saving") : t("profile_save_btn")}
+              </button>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -6570,51 +6754,7 @@ function SettingsPage({ theme, setTheme, fontSize, setFontSize }: { theme: Theme
           </div>
         </div>
       )}
-      {activeTab === 'workingHours' && (
-        <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-6 md:p-8">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight flex items-center gap-3">
-                <Clock className="text-blue-600" /> Horaires d'ouverture
-              </h3>
-              <p className="text-sm text-slate-500 font-medium mt-1">Personnalisez vos horaires de travail par jour</p>
-            </div>
-            <button onClick={saveWorkingHours} disabled={workingHoursLoading}
-              className={cn("px-5 py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider transition-all flex items-center gap-2",
-                workingHoursSaved ? "bg-emerald-600 text-white shadow-lg shadow-emerald-100" : "bg-blue-600 text-white shadow-lg shadow-blue-100 hover:bg-blue-700"
-              )}>
-              {workingHoursLoading ? 'Enregistrement...' : workingHoursSaved ? '✓ Enregistré' : 'Enregistrer'}
-            </button>
-          </div>
-          <div className="space-y-2">
-            {[1, 2, 3, 4, 5, 6, 0].map(dow => {
-              const h = workingHours.find(w => w.day_of_week === dow);
-              if (!h) return null;
-              return (
-                <div key={dow} className={cn("flex items-center gap-3 p-3 rounded-2xl border transition-all", h.is_available ? "bg-slate-50 border-slate-200" : "bg-red-50/50 border-red-200")}>
-                  <div className="w-24 shrink-0">
-                    <p className={cn("font-bold text-sm", h.is_available ? "text-slate-800" : "text-red-500")}>{dayNames[dow === 0 ? 6 : dow - 1]}</p>
-                  </div>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={h.is_available} onChange={e => handleWorkingHourChange(dow, 'is_available', e.target.checked)} className="w-4 h-4 rounded accent-blue-600" />
-                    <span className="text-xs font-semibold text-slate-500">Ouvert</span>
-                  </label>
-                  {h.is_available && (
-                    <div className="flex items-center gap-2 ml-auto">
-                      <input type="time" value={h.start_time} onChange={e => handleWorkingHourChange(dow, 'start_time', e.target.value)} className="px-2 py-1.5 bg-white rounded-lg border border-slate-200 text-sm font-bold text-slate-700 outline-none w-28" />
-                      <span className="text-slate-400 text-xs font-bold">à</span>
-                      <input type="time" value={h.end_time} onChange={e => handleWorkingHourChange(dow, 'end_time', e.target.value)} className="px-2 py-1.5 bg-white rounded-lg border border-slate-200 text-sm font-bold text-slate-700 outline-none w-28" />
-                    </div>
-                  )}
-                  {!h.is_available && (
-                    <span className="ml-auto text-xs font-bold text-red-400 uppercase tracking-wider">Fermé</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+
     </div>
   );
 }
