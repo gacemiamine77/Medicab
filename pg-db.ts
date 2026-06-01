@@ -442,6 +442,22 @@ export async function initTables(): Promise<void> {
     if (colCheck.rows.length === 0) await pool.query("ALTER TABLE appointments ADD COLUMN source TEXT DEFAULT 'web'");
   } catch {}
   try {
+    const colCheck = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'appointments' AND column_name = 'patient_age'");
+    if (colCheck.rows.length === 0) await pool.query("ALTER TABLE appointments ADD COLUMN patient_age INTEGER");
+  } catch {}
+  try {
+    const colCheck = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'appointments' AND column_name = 'patient_sex'");
+    if (colCheck.rows.length === 0) await pool.query("ALTER TABLE appointments ADD COLUMN patient_sex TEXT");
+  } catch {}
+  try {
+    const colCheck = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'appointments' AND column_name = 'patient_commune'");
+    if (colCheck.rows.length === 0) await pool.query("ALTER TABLE appointments ADD COLUMN patient_commune TEXT");
+  } catch {}
+  try {
+    const colCheck = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'appointments' AND column_name = 'patient_wilaya'");
+    if (colCheck.rows.length === 0) await pool.query("ALTER TABLE appointments ADD COLUMN patient_wilaya TEXT");
+  } catch {}
+  try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS doctor_working_hours (
         id SERIAL PRIMARY KEY,

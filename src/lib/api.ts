@@ -139,6 +139,10 @@ export interface Appointment {
   patient_name?: string;
   patient_phone?: string;
   patient_email?: string;
+  patient_age?: number;
+  patient_sex?: string;
+  patient_commune?: string;
+  patient_wilaya?: string;
   cancellation_reason?: string;
   doctor_notes?: string;
   rescheduled_to_date?: string;
@@ -443,6 +447,13 @@ export const api = {
   getPatient: async (id: number): Promise<Patient & { consultations: Consultation[], appointments: Appointment[], exams: MedicalExam[], reports: MedicalReport[] }> => {
     const res = await fetch(`/api/patients/${id}`, { headers: getHeaders() });
     return handleResponse(res, "Failed to fetch patient");
+  },
+
+  searchPatientByPhone: async (phone: string): Promise<Patient | null> => {
+    const res = await fetch(`/api/patients/search-by-phone?phone=${encodeURIComponent(phone)}`, { headers: getHeaders() });
+    if (res.status === 404) return null;
+    const data = await res.json();
+    return data;
   },
   
   createPatient: async (patient: Partial<Patient>): Promise<Patient> => {

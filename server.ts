@@ -699,6 +699,21 @@ async function startServer() {
     } catch (err) { res.status(500).json({ error: (err as Error).message }); }
   });
 
+  app.get("/api/patients/search-by-phone", authenticateToken, async (req: any, res) => {
+    try {
+      const { phone } = req.query;
+      if (!phone) return res.status(400).json({ error: "Phone requis" });
+      const owned = await pgQuery('SELECT * FROM patients WHERE doctor_id = $1 AND phone = $2 LIMIT 1', [req.user.id, phone]);
+      if (owned.length > 0) return res.json(owned[0]);
+      const sharedIds = (await pgQuery('SELECT patient_id FROM shared_patients WHERE doctor_id = $1', [req.user.id])).map((r: any) => r.patient_id).filter(Boolean);
+      if (sharedIds.length > 0) {
+        const shared = await pgQuery(`SELECT * FROM patients WHERE id IN (${sharedIds.map((_: any, i: number) => `$${i + 1}`).join(',')}) AND phone = $${sharedIds.length + 1} LIMIT 1`, [...sharedIds, phone]);
+        if (shared.length > 0) return res.json(shared[0]);
+      }
+      res.json(null);
+    } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+  });
+
   app.post("/api/patients", authenticateToken, async (req: any, res) => {
     const { first_name, last_name, nin, gender, birth_date, blood_group, photo, phone, phone_secondary, email, address, city, wilaya, profession, nss, insurance, mutuelle, emergency_contact, medical_history, doctor_id } = req.body;
     try {
@@ -938,7 +953,7 @@ async function startServer() {
   });
 
   app.put("/api/appointments/:id", authenticateToken, async (req: any, res) => {
-    const { date, hour, reason, duration, status, patient_name, patient_phone, patient_email, cancellation_reason, doctor_notes, rescheduled_to_date, rescheduled_to_hour } = req.body;
+    const { date, hour, reason, duration, status, patient_name, patient_phone, patient_email, patient_age, patient_sex, patient_commune, patient_wilaya, cancellation_reason, doctor_notes, rescheduled_to_date, rescheduled_to_hour } = req.body;
     try {
       const appt = await queryOne('SELECT a.doctor_id, p.doctor_id as patient_doctor_id FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id WHERE a.id = $1', [req.params.id]);
       if (!appt) return res.status(404).json({ error: "Not found" });
@@ -952,6 +967,10 @@ async function startServer() {
       if (patient_name !== undefined) updateData.patient_name = patient_name;
       if (patient_phone !== undefined) updateData.patient_phone = patient_phone;
       if (patient_email !== undefined) updateData.patient_email = patient_email;
+      if (patient_age !== undefined) updateData.patient_age = patient_age;
+      if (patient_sex !== undefined) updateData.patient_sex = patient_sex;
+      if (patient_commune !== undefined) updateData.patient_commune = patient_commune;
+      if (patient_wilaya !== undefined) updateData.patient_wilaya = patient_wilaya;
       if (cancellation_reason !== undefined) updateData.cancellation_reason = cancellation_reason;
       if (doctor_notes !== undefined) updateData.doctor_notes = doctor_notes;
       if (rescheduled_to_date !== undefined) updateData.rescheduled_to_date = rescheduled_to_date;
@@ -1187,7 +1206,8 @@ async function startServer() {
       const { phone } = req.query;
       if (!phone) return res.status(400).json({ error: "phone required" });
       const rows = await pgQuery(`
-        SELECT a.id, a.booking_reference, a.patient_name, a.date, a.hour, a.reason, a.status, a.source,
+        SELECT a.id, a.booking_reference, a.patient_name, a.patient_phone, a.patient_email, a.patient_age, a.patient_sex, a.patient_commune, a.patient_wilaya,
+               a.date, a.hour, a.reason, a.status, a.source,
                a.cancellation_reason, a.doctor_notes, a.rescheduled_to_date, a.rescheduled_to_hour,
                u.full_name as doctor_name, u.clinic_name, u.address, u.city, u.phone as doctor_phone, u.specialty
         FROM appointments a
@@ -1196,6 +1216,26 @@ async function startServer() {
         ORDER BY a.date DESC, a.hour DESC
       `, [phone]);
       res.json(rows);
+    } catch (err) { res.status(500).json({ error: (err as Error).message }); }
+  });
+
+  app.put("/api/public/appointments/:ref/patient-info", async (req, res) => {
+    const { patient_name, patient_age, patient_sex, patient_commune, patient_wilaya } = req.body;
+    if (!patient_name && !patient_age && !patient_sex && !patient_commune && !patient_wilaya) {
+      return res.status(400).json({ error: "Au moins un champ requis" });
+    }
+    try {
+      const appt = await queryOne('SELECT * FROM appointments WHERE booking_reference = $1', [req.params.ref]);
+      if (!appt) return res.status(404).json({ error: "Rendez-vous introuvable" });
+      if (appt.status !== 'confirmed') return res.status(400).json({ error: "Le rendez-vous doit être confirmé pour ajouter vos informations" });
+      const updateData: any = {};
+      if (patient_name !== undefined) updateData.patient_name = patient_name;
+      if (patient_age !== undefined) updateData.patient_age = patient_age;
+      if (patient_sex !== undefined) updateData.patient_sex = patient_sex;
+      if (patient_commune !== undefined) updateData.patient_commune = patient_commune;
+      if (patient_wilaya !== undefined) updateData.patient_wilaya = patient_wilaya;
+      await pgUpdate('appointments', appt.id, updateData);
+      res.json({ success: true, message: "Informations mises à jour" });
     } catch (err) { res.status(500).json({ error: (err as Error).message }); }
   });
 

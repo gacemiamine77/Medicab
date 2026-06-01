@@ -4294,6 +4294,36 @@ function AppointmentManager({ appointments, onPatientClick, onRefresh, onSwitchT
   const [showAddForm, setShowAddForm] = useState(false);
   const [editAppointment, setEditAppointment] = useState<Appointment | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [patientByPhone, setPatientByPhone] = useState<Record<string, Patient | null>>({});
+  const [creatingPatient, setCreatingPatient] = useState<string | null>(null);
+
+  // Lookup existing patients by phone for confirmed appointments
+  useEffect(() => {
+    const confirmedWithPhone = appointments.filter(a => a.status === 'confirmed' && a.patient_phone && !(a.patient_phone in patientByPhone));
+    if (confirmedWithPhone.length === 0) return;
+    for (const app of confirmedWithPhone) {
+      api.searchPatientByPhone(app.patient_phone!).then(p => {
+        setPatientByPhone(prev => ({ ...prev, [app.patient_phone!]: p }));
+      }).catch(() => {});
+    }
+  }, [appointments]);
+
+  const handleCreatePatientFromAppointment = async (app: Appointment) => {
+    if (!app.patient_phone) return;
+    setCreatingPatient(app.patient_phone);
+    try {
+      const names = (app.patient_name || '').split(' ').filter(Boolean);
+      const first_name = names.slice(1).join(' ') || names[0] || '';
+      const last_name = names[0] || '';
+      const patient = await api.createPatient({ first_name, last_name, phone: app.patient_phone });
+      setPatientByPhone(prev => ({ ...prev, [app.patient_phone!]: patient }));
+      onPatientClick(patient.id, app);
+    } catch (err: any) {
+      alert("Erreur lors de la création du patient: " + (err.message || ''));
+    } finally {
+      setCreatingPatient(null);
+    }
+  };
 
   const handleStatusChange = async (app: Appointment, status: string) => {
     try {
@@ -4399,6 +4429,14 @@ function AppointmentManager({ appointments, onPatientClick, onRefresh, onSwitchT
                           <p className="text-lg font-black text-slate-800 uppercase">{app.patient_name}</p>
                           {app.patient_phone && <p className="text-xs text-slate-500 font-medium flex items-center gap-1"><Phone size={11} /> {app.patient_phone}</p>}
                           {app.booking_reference && <p className="text-[10px] text-slate-400 font-mono mt-0.5">Réf: {app.booking_reference}</p>}
+                          {(app.patient_age || app.patient_sex || app.patient_commune || app.patient_wilaya) && (
+                            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[11px] text-slate-500">
+                              {app.patient_age && <span>{app.patient_age} ans</span>}
+                              {app.patient_sex && <span>{app.patient_sex}</span>}
+                              {app.patient_commune && <span>{app.patient_commune}</span>}
+                              {app.patient_wilaya && <span>{app.patient_wilaya}</span>}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <p className="text-lg font-black text-slate-800 uppercase group-hover:text-blue-600 transition-colors cursor-pointer" onClick={() => onPatientClick(app.patient_id, app)}>
@@ -4454,7 +4492,18 @@ function AppointmentManager({ appointments, onPatientClick, onRefresh, onSwitchT
                        <button onClick={async () => { const newDate = prompt("Nouvelle date (YYYY-MM-JJ):"); if (!newDate) return; const newHour = prompt("Nouvelle heure (HH:MM):"); if (!newHour) return; const reason = prompt("Motif du report (optionnel):"); try { await api.rescheduleAppointment(app.id, newDate, newHour, reason || ''); onRefresh(); } catch { alert("Erreur"); } }} className="flex-1 py-1.5 bg-purple-50 text-purple-700 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-100 transition-all">Reporter</button>
                      </div>
                    )}
-                   {app.status === 'scheduled' && (
+                    {app.status === 'confirmed' && app.patient_phone && (
+                      <div className="flex gap-2 pt-2 border-t border-slate-50">
+                        {(patientByPhone[app.patient_phone]) ? (
+                          <button onClick={() => onPatientClick((patientByPhone[app.patient_phone] as Patient).id, app)} className="flex-1 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-100 transition-all">Nouvelle consultation</button>
+                        ) : (
+                          <button onClick={() => handleCreatePatientFromAppointment(app)} disabled={creatingPatient === app.patient_phone} className="flex-1 py-1.5 bg-emerald-50 text-emerald-700 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all disabled:opacity-50">
+                            {creatingPatient === app.patient_phone ? 'Création...' : 'Nouveau patient'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {app.status === 'scheduled' && (
                      <div className="flex gap-2 pt-2 border-t border-slate-50">
                        <button onClick={() => handleStatusChange(app, 'completed')} className="flex-1 py-1.5 bg-emerald-50 text-emerald-700 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all">{t("mark_done")}</button>
                        <button onClick={() => handleStatusChange(app, 'cancelled')} className="flex-1 py-1.5 bg-red-50 text-red-700 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-100 transition-all">{t("mark_cancel")}</button>
