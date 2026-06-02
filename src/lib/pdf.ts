@@ -2,54 +2,79 @@ import { jsPDF } from "jspdf";
 import "jspdf-autotable";
 import { format } from "date-fns";
 import * as QRCode from "qrcode";
+import ArabicReshaper from "arabic-reshaper";
 
 const ARABIC_REGEX = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
-let arabicFontData: string | null = null;
+const GOOGLE_FONTS_CSS = "https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic&text=";
+const FALLBACK_FONT_URLS = [
+  "https://fonts.gstatic.com/s/notonaskharabic/v34/NotoNaskhArabic-Regular.ttf",
+  "https://fonts.gstatic.com/s/notonaskharabic/v33/NotoNaskhArabic-Regular.ttf",
+];
+let arabicFontReady = false;
+let arabicFontPromise: Promise<void> | null = null;
 
 function containsArabic(text: string): boolean {
   return ARABIC_REGEX.test(text);
 }
 
-async function ensureArabicFont(doc: jsPDF): Promise<void> {
-  if (_arabicFontEnsured) return;
-  if (arabicFontData) {
-    doc.addFileToVFS("NotoNaskhArabic-Regular.ttf", arabicFontData);
-    doc.addFont("NotoNaskhArabic-Regular.ttf", "NotoNaskhArabic", "normal");
-    _arabicFontEnsured = true;
-    return;
-  }
+function reshapeArabic(text: string): string {
+  if (!containsArabic(text)) return text;
   try {
-    const resp = await fetch(
-      "https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Regular.ttf"
-    );
-    const buffer = await resp.arrayBuffer();
-    const binary = new Uint8Array(buffer).reduce(
-      (data, byte) => data + String.fromCharCode(byte),
-      ""
-    );
-    arabicFontData = btoa(binary);
-    doc.addFileToVFS("NotoNaskhArabic-Regular.ttf", arabicFontData);
-    doc.addFont("NotoNaskhArabic-Regular.ttf", "NotoNaskhArabic", "normal");
-    _arabicFontEnsured = true;
+    const reshaped = ArabicReshaper.convertArabic(text);
+    return reshaped.split("").reverse().join("");
   } catch {
-    // Fallback – helvetica will be used (won't render Arabic but won't crash)
+    return text;
   }
 }
 
-let _arabicFontEnsured = false;
+async function resolveGoogleFontUrl(): Promise<string | null> {
+  try {
+    const chars = encodeURIComponent("ابتثجحخدذرزسشصضطظعغفقكلمنهوي ةىئآأؤلا");
+    const resp = await fetch(GOOGLE_FONTS_CSS + chars, { mode: "cors" });
+    if (resp.ok) {
+      const css = await resp.text();
+      const match = css.match(/url\(([^)]+)\)/);
+      if (match) return match[1].replace(/['"]/g, "");
+    }
+  } catch {}
+  return null;
+}
 
-function setFontSafe(doc: jsPDF, style: string, arabic: boolean) {
-  if (arabic && _arabicFontEnsured) {
-    doc.setFont("NotoNaskhArabic", "normal");
-  } else {
-    doc.setFont("helvetica", style);
+async function ensureArabicFont(doc: jsPDF): Promise<void> {
+  if (arabicFontReady) return;
+  if (arabicFontPromise) return arabicFontPromise;
+  arabicFontPromise = loadArabicFont(doc);
+  await arabicFontPromise;
+}
+
+async function loadArabicFont(doc: jsPDF): Promise<void> {
+  const resolvedUrl = await resolveGoogleFontUrl();
+  const urls = resolvedUrl ? [resolvedUrl, ...FALLBACK_FONT_URLS] : FALLBACK_FONT_URLS;
+  for (const url of urls) {
+    try {
+      const resp = await fetch(url, { mode: "cors" });
+      if (!resp.ok) continue;
+      const buffer = await resp.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      doc.addFileToVFS("NotoNaskhArabic-Regular.ttf", btoa(binary));
+      doc.addFont("NotoNaskhArabic-Regular.ttf", "NotoNaskhArabic", "normal");
+      arabicFontReady = true;
+      return;
+    } catch {}
   }
+  console.warn("Failed to load Arabic font - Arabic text may not render");
 }
 
 function writeText(doc: jsPDF, text: string, x: number, y: number, options?: any) {
-  const hasArabic = containsArabic(text);
-  setFontSafe(doc, options?.fontStyle || "normal", hasArabic);
-  doc.text(text, x, y, options);
+  if (containsArabic(text) && arabicFontReady) {
+    doc.setFont("NotoNaskhArabic", "normal");
+    doc.text(reshapeArabic(text), x, y, options);
+  } else {
+    doc.setFont("helvetica", options?.fontStyle || "normal");
+    doc.text(text, x, y, options);
+  }
 }
 
 function getAge(patient: any): number | null {
