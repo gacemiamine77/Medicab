@@ -1327,7 +1327,7 @@ export default function App() {
                           </span>
                         </td>
                         <td className="px-6 py-4 text-slate-600 text-sm">
-                          {p.birth_date ? new Date().getFullYear() - new Date(p.birth_date).getFullYear() : '-'} {t("years")}
+                          {p.birth_date ? new Date().getFullYear() - new Date(p.birth_date).getFullYear() : p.age ? p.age : '-'} {t("years")}
                         </td>
                         <td className="px-6 py-4 text-slate-500 font-mono text-sm">{p.phone}</td>
                         <td className="px-6 py-4 text-right">
@@ -2309,11 +2309,12 @@ function MedicalHistoryForm({ patientId, initialData, onCancel, onSuccess }: { p
   const restrictions = formData?.medication_restrictions || [];
 
   const addMedicationRestriction = (med: MedicationLibrary, type: 'allergy' | 'contraindication' = 'allergy') => {
+    const dciName = med.dci || med.name;
     const exists = restrictions.some(r => r.medicationId === med.id && r.type === type);
     if (exists) return;
     setFormData({
       ...formData,
-      medication_restrictions: [...restrictions, { type, medicationName: med.name, medicationId: med.id }]
+      medication_restrictions: [...restrictions, { type, medicationName: dciName, medicationId: med.id }]
     });
     setRestrictionSearch('');
   };
@@ -2405,7 +2406,8 @@ function MedicalHistoryForm({ patientId, initialData, onCancel, onSuccess }: { p
                       <div className="absolute z-10 w-full mt-1 bg-white rounded-xl shadow-xl border border-slate-200 max-h-60 overflow-auto">
                         {filteredMeds.slice(0, 8).map(m => (
                           <div key={m.id} className="border-b border-slate-50 last:border-0 p-2">
-                            <p className="text-xs font-bold text-slate-700">{m.name} {m.form && <span className="text-[10px] text-slate-400 font-normal">{m.form}</span>}</p>
+                            <p className="text-xs font-bold text-slate-700">{m.dci ? <span className="text-blue-600">{m.dci}</span> : m.name} {m.form && <span className="text-[10px] text-slate-400 font-normal">{m.form}</span>}</p>
+                            {m.dci && <p className="text-[9px] text-slate-400">{m.name}</p>}
                             {m.classe && <p className="text-[9px] text-slate-400 font-medium">{m.classe}</p>}
                             <div className="flex gap-1 mt-1">
                               <button type="button" onClick={() => addMedicationRestriction(m, 'allergy')} className="flex-1 px-2 py-1 text-[9px] font-black uppercase tracking-wider rounded bg-red-100 text-red-700 hover:bg-red-200 transition-colors">Allergie</button>
@@ -3161,7 +3163,7 @@ function PatientDetail({ id, onBack, user, pendingAppointmentId, onClearPendingA
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 pt-2 border-t border-slate-50">
             <InfoItem label={t("gender")} value={t(patient.gender || 'other')} />
-            <InfoItem label={t("birth_date")} value={patient.birth_date ? `${format(new Date(patient.birth_date), "dd/MM/yyyy")}${patient.age ? ` (${patient.age} ans)` : ''}` : patient.age ? `${patient.age} ans` : '-'} />
+            <InfoItem label={patient.birth_date ? t("birth_date") : t("age")} value={patient.birth_date ? `${format(new Date(patient.birth_date), "dd/MM/yyyy")}${patient.age ? ` (${patient.age} ${t("years")})` : ''}` : patient.age ? `${patient.age} ${t("years")}` : '-'} />
             <InfoItem label={t("phone")} value={patient.phone} isMono />
             <InfoItem label="Wilaya" value={patient.wilaya || '-'} />
           </div>
@@ -4896,21 +4898,27 @@ function ConsultationForm({ patientId, initialData, onCancel, onSuccess, isShare
     const warnings: { medicationName: string; restrictionType: string; restrictionLabel: string }[] = [];
     medications.forEach(m => {
       const lib = m.libraryId ? library.find(l => l.id === m.libraryId) : null;
+      const dci = lib?.dci;
       restrictions.forEach(r => {
-        if (r.type === 'allergy' && r.medicationId && r.medicationId === m.libraryId) {
-          warnings.push({ medicationName: m.name, restrictionType: 'allergy', restrictionLabel: `Allergie : ${r.medicationName}` });
-        } else if (r.type === 'allergy' && !r.medicationId && m.name.toLowerCase().includes(r.medicationName.toLowerCase())) {
-          warnings.push({ medicationName: m.name, restrictionType: 'allergy', restrictionLabel: `Allergie : ${r.medicationName}` });
-        } else if (r.type === 'intolerance' && lib?.form?.toLowerCase().includes(r.medicationName.toLowerCase())) {
+        const rName = r.medicationName.toLowerCase();
+        const matchDci = dci && dci.toLowerCase().includes(rName);
+        const matchName = m.name.toLowerCase().includes(rName);
+        if (r.type === 'allergy') {
+          if (r.medicationId && r.medicationId === m.libraryId) {
+            warnings.push({ medicationName: m.name, restrictionType: 'allergy', restrictionLabel: `Allergie : ${r.medicationName}` });
+          } else if (!r.medicationId && (matchDci || matchName)) {
+            warnings.push({ medicationName: m.name, restrictionType: 'allergy', restrictionLabel: `Allergie : ${r.medicationName}` });
+          }
+        } else if (r.type === 'intolerance' && (lib?.form?.toLowerCase().includes(rName) || matchDci || matchName)) {
           warnings.push({ medicationName: m.name, restrictionType: 'intolerance', restrictionLabel: `Ne supporte pas : ${r.medicationName}` });
-        } else if (r.type === 'intolerance' && m.name.toLowerCase().includes(r.medicationName.toLowerCase())) {
-          warnings.push({ medicationName: m.name, restrictionType: 'intolerance', restrictionLabel: `Ne supporte pas : ${r.medicationName}` });
-        } else if (r.type === 'class' && lib?.classe?.toLowerCase().includes(r.medicationName.toLowerCase())) {
+        } else if (r.type === 'class' && lib?.classe?.toLowerCase().includes(rName)) {
           warnings.push({ medicationName: m.name, restrictionType: 'class', restrictionLabel: `Allergie de classe : ${r.medicationName}` });
-        } else if (r.type === 'contraindication' && r.medicationId && r.medicationId === m.libraryId) {
-          warnings.push({ medicationName: m.name, restrictionType: 'contraindication', restrictionLabel: `Contre-indiqué : ${r.medicationName}` });
-        } else if (r.type === 'contraindication' && !r.medicationId && m.name.toLowerCase().includes(r.medicationName.toLowerCase())) {
-          warnings.push({ medicationName: m.name, restrictionType: 'contraindication', restrictionLabel: `Contre-indiqué : ${r.medicationName}` });
+        } else if (r.type === 'contraindication') {
+          if (r.medicationId && r.medicationId === m.libraryId) {
+            warnings.push({ medicationName: m.name, restrictionType: 'contraindication', restrictionLabel: `Contre-indiqué : ${r.medicationName}` });
+          } else if (!r.medicationId && (matchDci || matchName)) {
+            warnings.push({ medicationName: m.name, restrictionType: 'contraindication', restrictionLabel: `Contre-indiqué : ${r.medicationName}` });
+          }
         }
       });
     });

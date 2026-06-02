@@ -3,12 +3,69 @@ import "jspdf-autotable";
 import { format } from "date-fns";
 import * as QRCode from "qrcode";
 
+const ARABIC_REGEX = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+let arabicFontData: string | null = null;
+
+function containsArabic(text: string): boolean {
+  return ARABIC_REGEX.test(text);
+}
+
+async function ensureArabicFont(doc: jsPDF): Promise<void> {
+  if (_arabicFontEnsured) return;
+  if (arabicFontData) {
+    doc.addFileToVFS("NotoNaskhArabic-Regular.ttf", arabicFontData);
+    doc.addFont("NotoNaskhArabic-Regular.ttf", "NotoNaskhArabic", "normal");
+    _arabicFontEnsured = true;
+    return;
+  }
+  try {
+    const resp = await fetch(
+      "https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Regular.ttf"
+    );
+    const buffer = await resp.arrayBuffer();
+    const binary = new Uint8Array(buffer).reduce(
+      (data, byte) => data + String.fromCharCode(byte),
+      ""
+    );
+    arabicFontData = btoa(binary);
+    doc.addFileToVFS("NotoNaskhArabic-Regular.ttf", arabicFontData);
+    doc.addFont("NotoNaskhArabic-Regular.ttf", "NotoNaskhArabic", "normal");
+    _arabicFontEnsured = true;
+  } catch {
+    // Fallback – helvetica will be used (won't render Arabic but won't crash)
+  }
+}
+
+let _arabicFontEnsured = false;
+
+function setFontSafe(doc: jsPDF, style: string, arabic: boolean) {
+  if (arabic && _arabicFontEnsured) {
+    doc.setFont("NotoNaskhArabic", "normal");
+  } else {
+    doc.setFont("helvetica", style);
+  }
+}
+
+function writeText(doc: jsPDF, text: string, x: number, y: number, options?: any) {
+  const hasArabic = containsArabic(text);
+  setFontSafe(doc, options?.fontStyle || "normal", hasArabic);
+  doc.text(text, x, y, options);
+}
+
+function getAge(patient: any): number | null {
+  if (patient.birth_date) {
+    return new Date().getFullYear() - new Date(patient.birth_date).getFullYear();
+  }
+  return patient.age ?? null;
+}
+
 export async function generatePrescriptionPDF(patient: any, consultation: any, medications: any[], doctor: any, prescriptionCode?: string) {
   const storedTemplate = typeof localStorage !== "undefined" ? localStorage.getItem("medicab_prescription_template") : null;
   const template = storedTemplate ? JSON.parse(storedTemplate) : {};
   const pageFormat = template.format === "a5" ? "a5" : "a4";
   const orientation = template.orientation === "landscape" ? "landscape" : "portrait";
   const doc = new jsPDF({ format: pageFormat, orientation });
+  await ensureArabicFont(doc);
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const marginTop = Number(template.marginTop || 18);
@@ -73,11 +130,11 @@ export async function generatePrescriptionPDF(patient: any, consultation: any, m
   doc.setFontSize(12);
   doc.setFont("helvetica", "bold");
   doc.text("PATIENT:", marginLeft + 30, marginTop + 37);
-  doc.setFont("helvetica", "normal");
-  doc.text(`${patient.last_name} ${patient.first_name}`, marginLeft + 52, marginTop + 37);
+  writeText(doc, `${patient.last_name} ${patient.first_name}`, marginLeft + 52, marginTop + 37, { fontStyle: "normal" });
   
-  if (patient.birth_date) {
-    const age = new Date().getFullYear() - new Date(patient.birth_date).getFullYear();
+  const age = getAge(patient);
+  if (age !== null) {
+    doc.setFont("helvetica", "normal");
     doc.text(`Âge: ${age} ans`, marginLeft + 30, marginTop + 44);
   }
   
@@ -99,8 +156,8 @@ export async function generatePrescriptionPDF(patient: any, consultation: any, m
   let y = printTop;
   doc.setFontSize(12);
   medications.forEach((med, index) => {
-    doc.setFont("helvetica", "bold");
-    doc.text(`${index + 1}. ${med.name} ${med.form ? '(' + med.form + ')' : ''} ${med.dosage || ""}`, marginLeft + 5, y);
+    const medLabel = `${index + 1}. ${med.name} ${med.form ? '(' + med.form + ')' : ''} ${med.dosage || ""}`;
+    writeText(doc, medLabel, marginLeft + 5, y, { fontStyle: "bold" });
     y += 7;
     doc.setFont("helvetica", "italic");
     doc.text(`${med.duration ? med.duration + ' - ' : ''}${med.instructions || ""}`, marginLeft + 10, y);
@@ -127,6 +184,7 @@ export async function generatePrescriptionPDF(patient: any, consultation: any, m
 
 export async function generateDispenseReceiptPDF(patient: any, medications: any[], pharmacist: any, doctorName: string, prescriptionCode?: string) {
   const doc = new jsPDF();
+  await ensureArabicFont(doc);
   
   // Header
   const pharmacyName = pharmacist?.clinic_name || "PHARMACIE";
@@ -152,7 +210,7 @@ export async function generateDispenseReceiptPDF(patient: any, medications: any[
 
   // Patient & Doctor Info
   doc.setFontSize(10);
-  doc.text(`Patient: ${patient.last_name} ${patient.first_name}`, 20, 45);
+  writeText(doc, `Patient: ${patient.last_name} ${patient.first_name}`, 20, 45);
   doc.text(`Pratiqué par: ${doctorName || "Médecin"}`, 20, 52);
   doc.text(`Date: ${format(new Date(), "dd/MM/yyyy HH:mm")}`, 190, 45, { align: "right" });
   if (prescriptionCode) {
@@ -198,6 +256,7 @@ export async function generateDispenseReceiptPDF(patient: any, medications: any[
 
 export async function generateInvoicePDF(patient: any, fee: number, doctor: any) {
   const doc = new jsPDF();
+  await ensureArabicFont(doc);
   
   // Header
   const clinicName = doctor?.clinic_name || "CLINIQUE MÉDICALE";
@@ -222,7 +281,7 @@ export async function generateInvoicePDF(patient: any, fee: number, doctor: any)
 
   // Billing Info
   doc.setFontSize(11);
-  doc.text(`Patient: ${patient.last_name} ${patient.first_name}`, 20, 55);
+  writeText(doc, `Patient: ${patient.last_name} ${patient.first_name}`, 20, 55);
   doc.text(`Date: ${format(new Date(), "dd/MM/yyyy")}`, 190, 55, { align: "right" });
   
   // Invoice Details
@@ -305,8 +364,9 @@ export function generateReportPDF(patient: any, report: any) {
   doc.save(`${report.type}_${safeName}_${format(new Date(), "yyyyMMdd")}.pdf`);
 }
 
-export function generateExamReportPDF(patient: any, exam: any, doctor: any) {
+export async function generateExamReportPDF(patient: any, exam: any, doctor: any) {
   const doc = new jsPDF();
+  await ensureArabicFont(doc);
 
   doc.setFontSize(18);
   doc.setTextColor(40);
@@ -323,10 +383,10 @@ export function generateExamReportPDF(patient: any, exam: any, doctor: any) {
 
   doc.setFontSize(11);
   doc.setFont("helvetica", "bold");
-  doc.text(`Patient: ${patient.last_name || ''} ${patient.first_name || ''}`, 20, 46);
+  writeText(doc, `Patient: ${patient.last_name || ''} ${patient.first_name || ''}`, 20, 46, { fontStyle: "bold" });
   doc.setFont("helvetica", "normal");
-  if (patient.birth_date) {
-    const age = new Date().getFullYear() - new Date(patient.birth_date).getFullYear();
+  const age = getAge(patient);
+  if (age !== null) {
     doc.text(`Âge: ${age} ans`, 20, 54);
   }
   doc.text(`Date: ${format(new Date(exam.date), "dd/MM/yyyy")}`, 190, 46, { align: "right" });
